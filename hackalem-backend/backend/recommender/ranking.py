@@ -1,83 +1,50 @@
 from recommender.models import Contractor, RecommendationRequest
-from recommender.ranking import rank_contractors
 
 
-def make_contractor(
-    contractor_id,
-    price
-):
-    return Contractor(
-        id=contractor_id,
-        anon_name=contractor_id,
-        categories=["Фотограф"],
-        city="Алматы",
-        city_imputed=False,
-        synthetic=False,
-        price_from_kzt=price,
-        price_imputed=False,
-        event_formats=["свадьба"],
-        languages=["русский"],
-        max_hours=8,
-        busy_dates=[],
-        description="Фотограф"
-    )
+def calculate_budget_score(
+    contractor: Contractor,
+    request: RecommendationRequest
+) -> float:
+
+    if request.budget <= 0:
+        return 0.0
+
+    ratio = contractor.price_from_kzt / request.budget
+
+    return max(0.0, min(1.0 - ratio, 1.0))
 
 
-def make_request():
-    return RecommendationRequest(
-        city="Алматы",
-        date="2026-10-10",
-        event_format="свадьба",
-        category="Фотограф",
-        budget=500000,
-        language="русский"
-    )
+def rank_contractors(
+    contractors: list[Contractor],
+    request: RecommendationRequest,
+    semantic_scores: dict[str, float] | None = None
+) -> list[Contractor]:
 
+    semantic_scores = semantic_scores or {}
 
-def test_max_three_results():
-    contractors = [
-        make_contractor("HK-1", 100000),
-        make_contractor("HK-2", 150000),
-        make_contractor("HK-3", 200000),
-        make_contractor("HK-4", 250000),
-        make_contractor("HK-5", 300000),
-    ]
+    def final_score(contractor: Contractor):
 
-    results = rank_contractors(
+        semantic_score = semantic_scores.get(
+            contractor.id,
+            0.0
+        )
+
+        budget_score = calculate_budget_score(
+            contractor,
+            request
+        )
+
+        return (
+            semantic_score * 0.7
+            + budget_score * 0.3
+        )
+
+    ranked = sorted(
         contractors,
-        make_request()
+        key=lambda contractor: (
+            -final_score(contractor),
+            contractor.id
+        )
     )
 
-    assert len(results) == 3
-
-
-def test_deterministic_order():
-    contractors = [
-        make_contractor("HK-3", 200000),
-        make_contractor("HK-1", 200000),
-        make_contractor("HK-2", 200000),
-    ]
-
-    request = make_request()
-
-    first = rank_contractors(
-        contractors,
-        request
-    )
-
-    second = rank_contractors(
-        contractors,
-        request
-    )
-
-    first_ids = [
-        contractor.id
-        for contractor in first
-    ]
-
-    second_ids = [
-        contractor.id
-        for contractor in second
-    ]
-
-    assert first_ids == second_ids
+    return ranked[:3]
