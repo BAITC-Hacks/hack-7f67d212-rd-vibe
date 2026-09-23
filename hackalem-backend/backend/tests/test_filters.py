@@ -1,115 +1,69 @@
-from recommender.models import Contractor, RecommendationRequest
 from recommender.filters import get_rejection_reasons
+from recommender.models import Contractor, RecommendationRequest
 
 
-def make_contractor():
-    return Contractor(
-        id="HK-TEST",
-        anon_name="Test Contractor",
-        categories=["Фотограф"],
-        city="Алматы",
-        city_imputed=False,
-        synthetic=False,
-        price_from_kzt=200000,
-        price_imputed=False,
-        event_formats=["свадьба"],
-        languages=["русский"],
-        max_hours=8,
-        busy_dates=["2026-10-15"],
-        description="Тестовый фотограф"
+def contractor(**overrides) -> Contractor:
+    data = {
+        "id": "HK-TEST",
+        "anon_name": "Тестовый профиль",
+        "categories": ["Ведущий"],
+        "city": "Алматы",
+        "city_imputed": False,
+        "synthetic": True,
+        "price_from_kzt": 500_000,
+        "price_imputed": False,
+        "event_formats": ["корпоратив"],
+        "languages": ["русский"],
+        "max_hours": 6,
+        "busy_dates": ["2026-10-15"],
+        "description": "Ведущий корпоративных событий.",
+    }
+    data.update(overrides)
+    return Contractor(**data)
+
+
+def request(**overrides) -> RecommendationRequest:
+    data = {
+        "city": "Алматы",
+        "date": "2026-10-16",
+        "event_format": "корпоратив",
+        "category": "Ведущий",
+        "budget": 700_000,
+        "duration": 6,
+        "language": "русский",
+    }
+    data.update(overrides)
+    return RecommendationRequest(**data)
+
+
+def test_matching_contractor_has_no_rejection_reasons():
+    assert get_rejection_reasons(contractor(), request()) == []
+
+
+def test_busy_contractor_is_rejected():
+    assert "busy" in get_rejection_reasons(
+        contractor(),
+        request(date="2026-10-15"),
     )
 
 
-def make_request():
-    return RecommendationRequest(
-        city="Алматы",
-        date="2026-10-10",
-        event_format="свадьба",
-        category="Фотограф",
-        budget=250000,
-        duration=6,
-        language="русский"
-    )
-
-
-def test_valid_contractor():
-    contractor = make_contractor()
-    request = make_request()
-
+def test_all_hard_constraints_are_reported():
     reasons = get_rejection_reasons(
-        contractor,
-        request
+        contractor(),
+        request(
+            city="Астана",
+            event_format="свадьба",
+            category="Фотограф",
+            budget=100_000,
+            duration=8,
+            language="казахский",
+        ),
     )
-
-    assert reasons == []
-
-
-def test_busy_contractor():
-    contractor = make_contractor()
-    request = make_request()
-
-    request.date = "2026-10-15"
-
-    reasons = get_rejection_reasons(
-        contractor,
-        request
-    )
-
-    assert "busy" in reasons
-
-
-def test_over_budget():
-    contractor = make_contractor()
-    request = make_request()
-
-    request.budget = 100000
-
-    reasons = get_rejection_reasons(
-        contractor,
-        request
-    )
-
-    assert "over_budget" in reasons
-
-
-def test_exact_budget_allowed():
-    contractor = make_contractor()
-    request = make_request()
-
-    request.budget = 200000
-
-    reasons = get_rejection_reasons(
-        contractor,
-        request
-    )
-
-    assert "over_budget" not in reasons
-
-
-def test_duration_too_long():
-    contractor = make_contractor()
-    request = make_request()
-
-    request.duration = 10
-
-    reasons = get_rejection_reasons(
-        contractor,
-        request
-    )
-
-    assert "duration_too_long" in reasons
-
-
-def test_none_max_hours_allowed():
-    contractor = make_contractor()
-    contractor.max_hours = None
-
-    request = make_request()
-    request.duration = 20
-
-    reasons = get_rejection_reasons(
-        contractor,
-        request
-    )
-
-    assert "duration_too_long" not in reasons
+    assert set(reasons) == {
+        "wrong_city",
+        "wrong_category",
+        "wrong_format",
+        "over_budget",
+        "wrong_language",
+        "duration_too_long",
+    }
