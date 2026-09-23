@@ -1,32 +1,83 @@
 from recommender.models import Contractor, RecommendationRequest
+from recommender.ranking import rank_contractors
 
 
-def calculate_budget_score(
-    contractor: Contractor,
-    request: RecommendationRequest
-) -> float:
-
-    if request.budget <= 0:
-        return 0.0
-
-    score = 1 - (
-        contractor.price_from_kzt / request.budget
+def make_contractor(
+    contractor_id,
+    price
+):
+    return Contractor(
+        id=contractor_id,
+        anon_name=contractor_id,
+        categories=["Фотограф"],
+        city="Алматы",
+        city_imputed=False,
+        synthetic=False,
+        price_from_kzt=price,
+        price_imputed=False,
+        event_formats=["свадьба"],
+        languages=["русский"],
+        max_hours=8,
+        busy_dates=[],
+        description="Фотограф"
     )
 
-    return max(0.0, min(score, 1.0))
+
+def make_request():
+    return RecommendationRequest(
+        city="Алматы",
+        date="2026-10-10",
+        event_format="свадьба",
+        category="Фотограф",
+        budget=500000,
+        language="русский"
+    )
 
 
-def rank_contractors(
-    contractors: list[Contractor],
-    request: RecommendationRequest
-) -> list[Contractor]:
+def test_max_three_results():
+    contractors = [
+        make_contractor("HK-1", 100000),
+        make_contractor("HK-2", 150000),
+        make_contractor("HK-3", 200000),
+        make_contractor("HK-4", 250000),
+        make_contractor("HK-5", 300000),
+    ]
 
-    ranked = sorted(
+    results = rank_contractors(
         contractors,
-        key=lambda contractor: (
-            -calculate_budget_score(contractor, request),
-            contractor.id
-        )
+        make_request()
     )
 
-    return ranked[:3]
+    assert len(results) == 3
+
+
+def test_deterministic_order():
+    contractors = [
+        make_contractor("HK-3", 200000),
+        make_contractor("HK-1", 200000),
+        make_contractor("HK-2", 200000),
+    ]
+
+    request = make_request()
+
+    first = rank_contractors(
+        contractors,
+        request
+    )
+
+    second = rank_contractors(
+        contractors,
+        request
+    )
+
+    first_ids = [
+        contractor.id
+        for contractor in first
+    ]
+
+    second_ids = [
+        contractor.id
+        for contractor in second
+    ]
+
+    assert first_ids == second_ids
