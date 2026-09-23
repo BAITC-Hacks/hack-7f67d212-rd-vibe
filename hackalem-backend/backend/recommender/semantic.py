@@ -1,155 +1,60 @@
 import json
 import os
-from pathlib import Path
-
 import numpy as np
 from dotenv import load_dotenv
 from openai import OpenAI
 
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# backend/
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+EMBEDDINGS_PATH = os.path.join(BASE_DIR, "embeddings.json")
 
-# backend/.env
-ENV_PATH = BASE_DIR / ".env"
-
-# backend/data/embeddings.json
-EMBEDDINGS_PATH = BASE_DIR / "data" / "embeddings.json"
-
-
-load_dotenv(ENV_PATH)
-
-
-def get_openai_client():
-    api_key = os.getenv("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")
-
-    if not api_key:
-        print("OPENAI_API_KEY не найден в .env")
-        return None
-
-    return OpenAI(api_key=api_key)
-
-
-def load_contractor_embeddings() -> dict[str, list[float]]:
-    """
-    Загружает embeddings подрядчиков.
-
-    Возвращает:
-    {
-        "HK-39372": [...],
-        "HK-XXXXX": [...]
-    }
-    """
-
-    if not EMBEDDINGS_PATH.exists():
-        print(
-            f"Файл embeddings не найден: "
-            f"{EMBEDDINGS_PATH}"
-        )
-        return {}
-
-    try:
-        with open(
-            EMBEDDINGS_PATH,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            data = json.load(file)
-
-        if not isinstance(data, dict):
-            print("embeddings.json должен содержать JSON object")
+def load_contractor_embeddings():
+    """Безопасная загрузка эмбеддингов с защитой от пустых файлов."""
+    if os.path.exists(EMBEDDINGS_PATH):
+        try:
+            with open(EMBEDDINGS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # Приводим все ключи к строкам на всякий случай
+                return {str(k): v for k, v in data.items()}
+        except Exception as e:
+            print(f"Ошибка загрузки embeddings.json: {e}")
             return {}
+    return {}
 
-        return {
-            str(contractor_id): vector
-            for contractor_id, vector in data.items()
-            if isinstance(vector, list)
-        }
-
-    except Exception as error:
-        print(
-            f"Ошибка загрузки embeddings.json: "
-            f"{error}"
-        )
-        return {}
-
-
-def cosine_similarity(
-    vector_a: list[float],
-    vector_b: list[float]
-) -> float:
-
-    a = np.asarray(vector_a, dtype=float)
-    b = np.asarray(vector_b, dtype=float)
-
-    if a.shape != b.shape:
-        return 0.0
-
+def cosine_similarity(a, b):
+    a = np.array(a)
+    b = np.array(b)
     norm_a = np.linalg.norm(a)
     norm_b = np.linalg.norm(b)
-
     if norm_a == 0 or norm_b == 0:
         return 0.0
+    return float(np.dot(a, b) / (norm_a * norm_b))
 
-    return float(
-        np.dot(a, b)
-        / (norm_a * norm_b)
-    )
-
-
-def get_semantic_scores(
-    user_query: str
-) -> dict[str, float]:
+def get_semantic_scores(user_query: str) -> dict:
     """
-    Возвращает:
-
-    {
-        "HK-39372": 0.74,
-        "HK-XXXXX": 0.68
-    }
+    Возвращает словарь {contractor_id (str): score} на основе семантической близости.
     """
-
     embeddings = load_contractor_embeddings()
-
     if not embeddings:
         return {}
 
     if not user_query or not user_query.strip():
-        return {
-            contractor_id: 0.0
-            for contractor_id in embeddings
-        }
-
-    client = get_openai_client()
-
-    if client is None:
-        return {}
+        return {cid: 0.5 for cid in embeddings}
 
     try:
         response = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=user_query.strip()
+            input=user_query,
+            model="text-embedding-3-small"
         )
-
-        query_embedding = (
-            response.data[0].embedding
-        )
-
-    except Exception as error:
-        print(
-            f"Ошибка OpenAI Embedding API: "
-            f"{error}"
-        )
+        query_vec = response.data[0].embedding
+    except Exception as e:
+        print(f"Ошибка OpenAI Embedding API: {e}")
         return {}
 
     scores = {}
-
-    for contractor_id, contractor_embedding in embeddings.items():
-
-        scores[contractor_id] = cosine_similarity(
-            query_embedding,
-            contractor_embedding
-        )
+    for cid, c_vec in embeddings.items():
+        scores[cid] = cosine_similarity(query_vec, c_vec)
 
     return scores
