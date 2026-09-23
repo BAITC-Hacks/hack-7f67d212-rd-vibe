@@ -23,3 +23,14 @@ class Contractor(BaseModel):
     busy_dates: list[str]
 
     description: str
+
+class RecommendationRequest(BaseModel):
+    city: str
+    date: str
+    event_format: str
+    category: str
+    budget: int
+
+    duration: Optional[int] = None
+    language: Optional[str] = None
+
