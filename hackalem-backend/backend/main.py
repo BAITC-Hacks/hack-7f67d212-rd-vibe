@@ -1,10 +1,10 @@
 from recommender.data_loader import load_contractors
 from recommender.filters import filter_contractors
+from recommender.ranking import rank_contractors
 from recommender.models import RecommendationRequest
 
 
 contractors = load_contractors()
-
 
 request = RecommendationRequest(
     city="Алматы",
@@ -15,27 +15,27 @@ request = RecommendationRequest(
     language="русский"
 )
 
-
-results, rejected = filter_contractors(
+suitable, rejected = filter_contractors(
     contractors,
+    request
+)
+
+results = rank_contractors(
+    suitable,
     request
 )
 
 
 print("Всего подрядчиков:", len(contractors))
+print("Прошли фильтры:", len(suitable))
+print("Показано пользователю:", len(results))
 
-print("Подходящих:", len(results))
+print("\nTOP подрядчики:")
 
-print("\nПричины отказа:")
-print(rejected)
+for index, contractor in enumerate(results, start=1):
 
-
-print("\nПодходящие подрядчики:")
-
-for contractor in results:
     print(
-        contractor.anon_name,
-        "-",
-        contractor.price_from_kzt,
-        "₸"
+        f"{index}. "
+        f"{contractor.anon_name} - "
+        f"{contractor.price_from_kzt} ₸"
     )
