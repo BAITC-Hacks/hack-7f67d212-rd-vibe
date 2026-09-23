@@ -1,72 +1,268 @@
 import json
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 from openai import OpenAI
 
-def main():
-    load_dotenv()
-    client = OpenAI(api_key=os.getenv("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"))
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    dataset_path = os.path.join(current_dir, "hackathon-dataset-anonymized.jsonl")
-    output_path = os.path.join(current_dir, "embeddings.json")
+# backend/
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-    if not os.path.exists(dataset_path):
-        print(f"Ошибка: Файл датасета {dataset_path} не найден!")
-        return
+# backend/data/contractors.jsonl
+DATASET_PATH = (
+    BASE_DIR
+    / "data"
+    / "contractors.jsonl"
+)
 
+# backend/data/embeddings.json
+OUTPUT_PATH = (
+    BASE_DIR
+    / "data"
+    / "embeddings.json"
+)
+
+# backend/.env
+ENV_PATH = BASE_DIR / ".env"
+
+
+def load_contractors(
+    path: Path
+) -> list[dict]:
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Датасет не найден: {path}"
+        )
+
+    content = path.read_text(
+        encoding="utf-8-sig"
+    ).strip()
+
+    if not content:
+        raise ValueError(
+            "Файл датасета пустой"
+        )
+
+    # Если файл является обычным JSON массивом
+    if content.startswith("["):
+
+        data = json.loads(content)
+
+        if not isinstance(data, list):
+            raise ValueError(
+                "JSON должен содержать список"
+            )
+
+        return data
+
+    # Если файл JSONL
     contractors = []
-    
-    # Пытаемся прочитать как JSON-массив или JSONL
-    try:
-        with open(dataset_path, "r", encoding="utf-8-sig") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                contractors = data
-    except Exception:
-        pass
 
-    if not contractors:
-        with open(dataset_path, "r", encoding="utf-8-sig") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    contractors.append(json.loads(line))
-                except Exception:
-                    continue
+    for line_number, line in enumerate(
+        content.splitlines(),
+        start=1
+    ):
 
-    print(f"Всего найдено записей в датасете: {len(contractors)}")
+        line = line.strip()
 
-    embeddings = {}
-    success_count = 0
-
-    for index, record in enumerate(contractors, start=1):
-        contractor_id = record.get("id")
-        if contractor_id is None:
+        if not line:
             continue
 
-        contractor_id_str = str(contractor_id)
-        description = record.get("description")
-        if not description or not description.strip():
-            description = "Описание отсутствует"
+        try:
+            contractors.append(
+                json.loads(line)
+            )
+
+        except json.JSONDecodeError as error:
+
+            raise ValueError(
+                f"Ошибка JSONL в строке "
+                f"{line_number}: {error}"
+            )
+
+    return contractors
+
+
+def main():
+
+    load_dotenv(ENV_PATH)
+
+    api_key = os.getenv(
+        "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"
+    )
+
+    if not api_key:
+        print(
+            "Ошибка: OPENAI_API_KEY "
+            "не найден в backend/.env"
+        )
+        return
+
+    client = OpenAI(
+        api_key=api_key
+    )
+
+    try:
+        contractors = load_contractors(
+            DATASET_PATH
+        )
+
+    except Exception as error:
+        print(
+            f"Ошибка загрузки датасета: "
+            f"{error}"
+        )
+        return
+
+    print(
+        f"Всего подрядчиков: "
+        f"{len(contractors)}"
+    )
+
+    embeddings = {}
+
+    failed_ids = []
+
+    for index, contractor in enumerate(
+        contractors,
+        start=1
+    ):
+
+        contractor_id = contractor.get(
+            "id"
+        )
+
+        description = contractor.get(
+            "description"
+        )
+
+        if contractor_id is None:
+
+            print(
+                f"[{index}] Нет ID"
+            )
+
+            failed_ids.append(
+                f"record_{index}"
+            )
+
+            continue
+
+        contractor_id = str(
+            contractor_id
+        )
+
+        if not description:
+            description = (
+                "Описание отсутствует"
+            )
+
+        description = str(
+            description
+        ).strip()
 
         try:
+
             response = client.embeddings.create(
                 model="text-embedding-3-small",
-                input=description,
+                input=description
             )
-            embeddings[contractor_id_str] = response.data[0].embedding
-            success_count += 1
-            print(f"[{index}/{len(contractors)}] Обработан ID: {contractor_id_str}")
-        except Exception as api_err:
-            print(f"Ошибка OpenAI API на ID {contractor_id_str}: {api_err}")
 
-    with open(output_path, "w", encoding="utf-8") as output_file:
-        json.dump(embeddings, output_file, ensure_ascii=False, indent=2)
+            embedding = (
+                response
+                .data[0]
+                .embedding
+            )
 
-    print(f"\n Успешно! Создано векторов: {success_count}. Сохранено в {output_path}")
+            embeddings[
+                contractor_id
+            ] = embedding
+
+            print(
+                f"[{index}/{len(contractors)}] "
+                f"OK: {contractor_id}"
+            )
+
+        except Exception as error:
+
+            failed_ids.append(
+                contractor_id
+            )
+
+            print(
+                f"[{index}/{len(contractors)}] "
+                f"ERROR {contractor_id}: "
+                f"{error}"
+            )
+
+    if failed_ids:
+
+        print(
+            "\nEmbeddings созданы "
+            "не для всех подрядчиков."
+        )
+
+        print(
+            "Не удалось обработать:"
+        )
+
+        for contractor_id in failed_ids:
+            print(
+                "-",
+                contractor_id
+            )
+
+        print(
+            "\nembeddings.json НЕ обновлён."
+        )
+
+        return
+
+    if (
+        len(embeddings)
+        != len(contractors)
+    ):
+
+        print(
+            "Ошибка: количество embeddings "
+            "не совпадает с количеством подрядчиков."
+        )
+
+        return
+
+    OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    with open(
+        OUTPUT_PATH,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            embeddings,
+            file,
+            ensure_ascii=False,
+            indent=2
+        )
+
+    print(
+        "\nГотово!"
+    )
+
+    print(
+        f"Создано embeddings: "
+        f"{len(embeddings)}"
+    )
+
+    print(
+        f"Файл: {OUTPUT_PATH}"
+    )
+
 
 if __name__ == "__main__":
     main()
