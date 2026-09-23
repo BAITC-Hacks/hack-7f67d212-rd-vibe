@@ -1,0 +1,15 @@
+@echo off
+setlocal
+cd /d "%~dp0"
+where py >nul 2>nul
+if %errorlevel% equ 0 (
+  py -3 run.py
+) else (
+  python run.py
+)
+if errorlevel 1 (
+  echo.
+  echo Could not start EventMatch. Read the error above and README.md.
+  pause
+)
+endlocal
