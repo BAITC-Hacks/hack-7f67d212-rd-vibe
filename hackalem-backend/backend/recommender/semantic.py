@@ -7,8 +7,15 @@ from openai import OpenAI
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EMBEDDINGS_PATH = os.path.join(BASE_DIR, "embeddings.json")
+MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DATA_DIR = os.path.join(os.path.dirname(MODULE_DIR), "data")
+DATA_DIR = (
+    BACKEND_DATA_DIR
+    if os.path.basename(MODULE_DIR).casefold() == "recommender"
+    and os.path.isdir(BACKEND_DATA_DIR)
+    else MODULE_DIR
+)
+EMBEDDINGS_PATH = os.path.join(DATA_DIR, "embeddings.json")
 
 def load_contractor_embeddings():
     """Безопасная загрузка эмбеддингов с защитой от пустых файлов."""
@@ -32,7 +39,35 @@ def cosine_similarity(a, b):
         return 0.0
     return float(np.dot(a, b) / (norm_a * norm_b))
 
-def get_semantic_scores(user_query: str) -> dict:
+def _get_field(record, name, default=None):
+    if isinstance(record, dict):
+        return record.get(name, default)
+    return getattr(record, name, default)
+
+
+def _make_embedding_query(user_query) -> str:
+    """Accept plain text or the backend's RecommendationRequest model."""
+    if isinstance(user_query, str):
+        return user_query.strip()
+
+    parts = []
+    free_text = _get_field(user_query, "semantic_query")
+    if not free_text:
+        free_text = _get_field(user_query, "query")
+    if free_text:
+        parts.append(str(free_text).strip())
+
+    event_format = _get_field(user_query, "event_format")
+    category = _get_field(user_query, "category")
+    if category:
+        parts.append(f"Категория: {category}")
+    if event_format:
+        parts.append(f"Формат мероприятия: {event_format}")
+
+    return ". ".join(part for part in parts if part)
+
+
+def get_semantic_scores(user_query) -> dict:
     """
     Возвращает словарь {contractor_id (str): score} на основе семантической близости.
     """
@@ -40,12 +75,13 @@ def get_semantic_scores(user_query: str) -> dict:
     if not embeddings:
         return {}
 
-    if not user_query or not user_query.strip():
+    embedding_query = _make_embedding_query(user_query)
+    if not embedding_query:
         return {cid: 0.5 for cid in embeddings}
 
     try:
         response = client.embeddings.create(
-            input=user_query,
+            input=embedding_query,
             model="text-embedding-3-small"
         )
         query_vec = response.data[0].embedding
